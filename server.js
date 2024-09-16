@@ -1,36 +1,14 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const fs = require('fs').promises;
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const axios = require('axios');
 const FormData = require('form-data');
-require('dotenv').config();
-
-ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 
-// Налаштування для завантаження файлів
-const uploadDirectory = path.join(__dirname, 'uploads');
-const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
-    try {
-      await fs.mkdir(uploadDirectory, { recursive: true });
-      cb(null, uploadDirectory);
-    } catch (error) {
-      cb(error);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage: storage });
+// Використовуємо зберігання в пам'яті для Vercel
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage, limits: { fileSize: 50 * 1024 * 1024 } }); // Обмеження 50MB
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -41,7 +19,7 @@ if (!OPENAI_API_KEY) {
 
 const tasks = new Map();
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static('public'));
 app.use(express.json());
 
 app.post('/api/start-analysis', upload.single('file'), async (req, res) => {
@@ -58,11 +36,8 @@ app.post('/api/start-analysis', upload.single('file'), async (req, res) => {
     
     tasks.set(taskId, { 
       status: 'processing', 
-      progress: 0, 
-      file: {
-        path: req.file.path,
-        originalName: req.file.originalname
-      }, 
+      progress: 0,
+      file: req.file.buffer,
       model: model 
     });
 
@@ -70,8 +45,9 @@ app.post('/api/start-analysis', upload.single('file'), async (req, res) => {
     
     res.json({ taskId });
 
-    processAudioFile(taskId, req.file.path, model).catch(error => {
-      console.error('Error in processAudioFile:', error);
+    // Запускаємо обробку асинхронно
+    processAudio(taskId).catch(error => {
+      console.error('Error in processAudio:', error);
       tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
     });
 
@@ -92,49 +68,32 @@ app.get('/api/task-status/:taskId', (req, res) => {
   res.json(task);
 });
 
-async function processAudioFile(taskId, filePath, model) {
-  const outputPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.mp3`);
-
+async function processAudio(taskId) {
+  const task = tasks.get(taskId);
+  
   try {
-    await convertToMp3(filePath, outputPath, taskId);
-    console.log(`File converted to MP3 for task: ${taskId}`);
+    // Транскрибація
+    updateTaskProgress(taskId, 30);
+    const transcript = await transcribeAudio(task.file);
     
-    const transcript = await transcribeAudio(outputPath, taskId);
-    console.log(`Audio transcribed for task: ${taskId}`);
-    
-    const analysis = await analyzeTranscript(transcript, taskId, model);
-    console.log(`Transcript analyzed for task: ${taskId}`);
+    // Аналіз
+    updateTaskProgress(taskId, 60);
+    const analysis = await analyzeTranscript(transcript, task.model);
     
     tasks.set(taskId, {
       status: 'completed',
       progress: 100,
       analysis: analysis
     });
-
-    await fs.unlink(filePath);
-    await fs.unlink(outputPath);
   } catch (error) {
-    console.error(`Error processing audio file for task ${taskId}:`, error);
+    console.error(`Error processing audio for task ${taskId}:`, error);
     tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
   }
 }
 
-function convertToMp3(input, output, taskId) {
-  return new Promise((resolve, reject) => {
-    ffmpeg(input)
-      .toFormat('mp3')
-      .on('progress', (progress) => {
-        updateTaskProgress(taskId, Math.min(progress.percent, 25));
-      })
-      .on('end', () => resolve())
-      .on('error', (err) => reject(err))
-      .save(output);
-  });
-}
-
-async function transcribeAudio(filePath, taskId) {
+async function transcribeAudio(audioBuffer) {
   const formData = new FormData();
-  formData.append('file', await fs.readFile(filePath), { filename: 'audio.mp3' });
+  formData.append('file', audioBuffer, { filename: 'audio.mp3', contentType: 'audio/mpeg' });
   formData.append('model', 'whisper-1');
   formData.append('language', 'uk');
 
@@ -148,7 +107,6 @@ async function transcribeAudio(filePath, taskId) {
       maxBodyLength: Infinity
     });
 
-    updateTaskProgress(taskId, 60);
     return response.data.text;
   } catch (error) {
     console.error('Error in transcribeAudio:', error);
@@ -156,7 +114,7 @@ async function transcribeAudio(filePath, taskId) {
   }
 }
 
-async function analyzeTranscript(transcript, taskId, model) {
+async function analyzeTranscript(transcript, model) {
   const prompt = `Проаналізуйте детально цей транскрипт продажного дзвінка:
 
   ${transcript}
@@ -218,7 +176,6 @@ async function analyzeTranscript(transcript, taskId, model) {
       }
     });
 
-    updateTaskProgress(taskId, 100);
     return response.data.choices[0].message.content;
   } catch (error) {
     console.error('Error in analyzeTranscript:', error);
@@ -234,9 +191,12 @@ function updateTaskProgress(taskId, progress) {
   }
 }
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Сервер запущено на порту ${port}`);
-});
+// Для локального тестування
+if (process.env.NODE_ENV !== 'production') {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
+}
 
 module.exports = app;
