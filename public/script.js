@@ -5,14 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const stagesDiv = document.getElementById('stages');
     const resultDiv = document.getElementById('result');
 
-    // Изначально скрываем лоадер и отключаем кнопку анализа
     loader.style.display = 'none';
     analyzeButton.disabled = true;
 
     fileInput.addEventListener('change', (e) => {
         const fileName = e.target.files[0]?.name || 'Виберіть аудіо файл';
         e.target.nextElementSibling.querySelector('span').textContent = fileName;
-        // Активируем кнопку анализа только когда выбран файл
         analyzeButton.disabled = !e.target.files[0];
     });
 
@@ -27,12 +25,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         stagesDiv.innerHTML = '';
         resultDiv.innerHTML = '';
-        loader.style.display = 'flex'; // Показываем лоадер только при начале анализа
+        loader.style.display = 'flex';
         analyzeButton.disabled = true;
 
         try {
             updateStage('Завантаження файлу', false);
-            const response = await fetch('/analyze', {
+            const response = await fetch('/start-analysis', {
                 method: 'POST',
                 body: formData
             });
@@ -41,33 +39,63 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
+            const { taskId } = await response.json();
             updateStage('Завантаження файлу', true);
             updateStage('Обробка файлу', false);
 
-            const result = await response.json();
-
-            updateStage('Обробка файлу', true);
-            updateStage('Аналіз голосу', true);
-            updateStage('Аналіз змісту', true);
-
-            loader.style.display = 'none'; // Скрываем лоадер после завершения анализа
-            analyzeButton.disabled = false;
-
-            resultDiv.innerHTML = `
-                <h2>Результати аналізу:</h2>
-                <h3>Аналіз голосу:</h3>
-                <pre>${result.voiceAnalysis}</pre>
-                <h3>Аналіз змісту:</h3>
-                <pre>${result.contentAnalysis}</pre>
-            `;
+            await pollTaskStatus(taskId);
         } catch (error) {
             console.error('Помилка:', error);
+            updateStage('Помилка обробки', false);
+            resultDiv.innerHTML = `<h2>Помилка</h2><pre>${error.message}</pre>`;
+        } finally {
             loader.style.display = 'none';
             analyzeButton.disabled = false;
-            resultDiv.innerHTML = `<h2>Помилка</h2><pre>${error.message}</pre>`;
-            updateStage('Помилка обробки', false);
         }
     });
+
+    async function pollTaskStatus(taskId) {
+        const pollInterval = 5000; // 5 секунд
+        const maxAttempts = 60; // Максимальное количество попыток (5 минут)
+        let attempts = 0;
+
+        while (attempts < maxAttempts) {
+            try {
+                const response = await fetch(`/task-status/${taskId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (result.status === 'completed') {
+                    updateStage('Обробка файлу', true);
+                    updateStage('Аналіз голосу', true);
+                    updateStage('Аналіз змісту', true);
+
+                    resultDiv.innerHTML = `
+                        <h2>Результати аналізу:</h2>
+                        <h3>Аналіз голосу:</h3>
+                        <pre>${result.voiceAnalysis}</pre>
+                        <h3>Аналіз змісту:</h3>
+                        <pre>${result.contentAnalysis}</pre>
+                    `;
+                    return;
+                } else if (result.status === 'failed') {
+                    throw new Error('Помилка обробки завдання на сервері');
+                }
+
+                // Если задача всё ещё выполняется, ждем и пробуем снова
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+                attempts++;
+            } catch (error) {
+                console.error('Помилка при перевірці статусу:', error);
+                throw error;
+            }
+        }
+
+        throw new Error('Перевищено час очікування результатів аналізу');
+    }
 
     function updateStage(stageName, isComplete) {
         const stageElement = document.createElement('div');
