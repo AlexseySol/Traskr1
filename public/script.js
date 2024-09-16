@@ -11,8 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
     progressFill.className = 'progress-fill';
     progressBar.appendChild(progressFill);
 
-    let isProgressBarAdded = false;
-
     fileInput.addEventListener('change', () => {
         const fileName = fileInput.files[0]?.name || 'Додати аудіо';
         document.querySelector('.file-text').textContent = fileName;
@@ -31,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         statusDiv.textContent = 'Завантаження файлу...';
         resultDiv.innerHTML = '';
-        addProgressBar();
+        statusDiv.appendChild(progressBar);
         setFormDisabled(true);
 
         try {
@@ -55,7 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
             setFormDisabled(false);
             document.querySelector('.file-text').textContent = 'Додати аудіо';
             fileInput.value = '';
-            removeProgressBar();
+            if (statusDiv.contains(progressBar)) {
+                statusDiv.removeChild(progressBar);
+            }
         }
     });
 
@@ -104,19 +104,5 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateProgressBar(progress) {
         progressFill.style.width = `${progress}%`;
         statusDiv.textContent = `Обробка файлу... ${progress}%`;
-    }
-
-    function addProgressBar() {
-        if (!isProgressBarAdded) {
-            statusDiv.appendChild(progressBar);
-            isProgressBarAdded = true;
-        }
-    }
-
-    function removeProgressBar() {
-        if (isProgressBarAdded) {
-            statusDiv.removeChild(progressBar);
-            isProgressBarAdded = false;
-        }
     }
 });

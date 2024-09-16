@@ -32,35 +32,44 @@ app.get('/api/health', (req, res) => {
 });
 
 app.post('/api/start-analysis', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'Файл не завантажено' });
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не завантажено' });
+    }
+
+    const taskId = uuidv4();
+    const model = req.body.model || 'chatgpt-4o-latest';
+    tasks.set(taskId, { status: 'processing', progress: 0, file: req.file, model: model });
+
+    // Запускаємо обробку в окремому процесі
+    processAudioFile(taskId, req.file.path, model);
+
+    res.json({ taskId });
+  } catch (error) {
+    console.error('Помилка при створенні завдання:', error);
+    res.status(500).json({ error: 'Внутрішня помилка сервера' });
   }
-
-  const taskId = uuidv4();
-  const model = req.body.model || 'chatgpt-4o-latest';
-  tasks.set(taskId, { status: 'processing', progress: 0, file: req.file, model: model });
-
-  // Запускаємо обробку в окремому процесі
-  processAudioFile(taskId, req.file.path, model);
-
-  res.json({ taskId });
 });
 
 app.get('/api/task-status/:taskId', (req, res) => {
-  const taskId = req.params.taskId;
-  const task = tasks.get(taskId);
+  try {
+    const taskId = req.params.taskId;
+    const task = tasks.get(taskId);
 
-  if (!task) {
-    return res.status(404).json({ error: 'Завдання не знайдено' });
+    if (!task) {
+      return res.status(404).json({ error: 'Завдання не знайдено' });
+    }
+
+    res.json(task);
+  } catch (error) {
+    console.error('Помилка при отриманні статусу завдання:', error);
+    res.status(500).json({ error: 'Внутрішня помилка сервера' });
   }
-
-  res.json(task);
 });
 
 function processAudioFile(taskId, filePath, model) {
   const outputPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.mp3`);
 
-  // Конвертація аудіо в mp3
   ffmpeg(filePath)
     .toFormat('mp3')
     .on('progress', (progress) => {
@@ -185,8 +194,9 @@ function updateTaskProgress(taskId, progress) {
   }
 }
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Щось пішло не так!');
 });
 
 const port = process.env.PORT || 3000;
