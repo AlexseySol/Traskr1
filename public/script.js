@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
     progressFill.className = 'progress-fill';
     progressBar.appendChild(progressFill);
 
+    let isProgressBarAdded = false;
+
     fileInput.addEventListener('change', () => {
         const fileName = fileInput.files[0]?.name || 'Додати аудіо';
         document.querySelector('.file-text').textContent = fileName;
@@ -29,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         statusDiv.textContent = 'Завантаження файлу...';
         resultDiv.innerHTML = '';
-        statusDiv.appendChild(progressBar);
+        addProgressBar();
         setFormDisabled(true);
 
         try {
@@ -53,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setFormDisabled(false);
             document.querySelector('.file-text').textContent = 'Додати аудіо';
             fileInput.value = '';
-            statusDiv.removeChild(progressBar);
+            removeProgressBar();
         }
     });
 
@@ -66,8 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function pollTaskStatus(taskId) {
-        const pollInterval = 1000; // 1 секунда
-
+        const pollInterval = 5000; // 5 секунд
         while (true) {
             try {
                 const response = await fetch(`/api/task-status/${taskId}`);
@@ -94,7 +95,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 await new Promise(resolve => setTimeout(resolve, pollInterval));
             } catch (error) {
                 console.error('Помилка при перевірці статусу:', error);
-                throw error;
+                statusDiv.textContent = `Помилка: ${error.message}`;
+                return;
             }
         }
     }
@@ -102,5 +104,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateProgressBar(progress) {
         progressFill.style.width = `${progress}%`;
         statusDiv.textContent = `Обробка файлу... ${progress}%`;
+    }
+
+    function addProgressBar() {
+        if (!isProgressBarAdded) {
+            statusDiv.appendChild(progressBar);
+            isProgressBarAdded = true;
+        }
+    }
+
+    function removeProgressBar() {
+        if (isProgressBarAdded) {
+            statusDiv.removeChild(progressBar);
+            isProgressBarAdded = false;
+        }
     }
 });
