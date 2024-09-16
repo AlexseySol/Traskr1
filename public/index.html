@@ -17,6 +17,19 @@
                 <span class="file-text">Додати аудіо</span>
             </label>
         </div>
+        <div class="model-selection">
+            <h3>Виберіть модель нейромережі:</h3>
+            <div class="model-option">
+                <input type="radio" id="gpt-4o" name="model" value="chatgpt-4o-latest" checked>
+                <label for="gpt-4o">GPT-4 Turbo (chatgpt-4o-latest)</label>
+                <p class="model-description">Новіша версія з розширеними можливостями та оновленою базою знань.</p>
+            </div>
+            <div class="model-option">
+                <input type="radio" id="gpt-4o-2024" name="model" value="gpt-4o-2024-08-06">
+                <label for="gpt-4o-2024">GPT-4 Turbo (gpt-4o-2024-08-06)</label>
+                <p class="model-description">Стабільна версія з фіксованою датою оновлення знань (6 серпня 2024).</p>
+            </div>
+        </div>
         <button id="analyze-button" disabled>Аналізувати</button>
         <div id="status"></div>
         <div id="result"></div>

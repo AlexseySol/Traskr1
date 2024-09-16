@@ -36,10 +36,11 @@ app.post('/api/start-analysis', upload.single('file'), async (req, res) => {
   }
 
   const taskId = uuidv4();
-  tasks.set(taskId, { status: 'processing', file: req.file });
+  const model = req.body.model || 'chatgpt-4o-latest';
+  tasks.set(taskId, { status: 'processing', progress: 0, file: req.file, model: model });
 
   // Запускаем асинхронную обработку
-  processAudioFile(taskId, req.file.path);
+  processAudioFile(taskId, req.file.path, model);
 
   res.json({ taskId });
 });
@@ -55,32 +56,48 @@ app.get('/api/task-status/:taskId', (req, res) => {
   res.json(task);
 });
 
-async function processAudioFile(taskId, filePath) {
+async function processAudioFile(taskId, filePath, model) {
   try {
     const outputPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.mp3`);
 
     // Перекодуємо аудіо в mp3
     await new Promise((resolve, reject) => {
+      let duration = 0;
+      let progress = 0;
       ffmpeg(filePath)
         .toFormat('mp3')
+        .on('codecData', data => {
+          duration = parseInt(data.duration.replace(/:/g, ''));
+        })
+        .on('progress', info => {
+          const time = parseInt(info.timemark.replace(/:/g, ''));
+          progress = Math.min(Math.round((time / duration) * 25), 25);
+          updateTaskProgress(taskId, progress);
+        })
         .on('error', (err) => reject(err))
         .on('end', () => resolve())
         .save(outputPath);
     });
 
+    updateTaskProgress(taskId, 25);
     console.log('Файл конвертовано в mp3');
 
     // Транскрибація
+    updateTaskProgress(taskId, 30);
     const transcript = await transcribeAudio(outputPath);
+    updateTaskProgress(taskId, 60);
     console.log('Транскрибацію завершено');
 
     // Аналіз голосу та змісту
-    const analysis = await analyzeTranscript(transcript);
+    updateTaskProgress(taskId, 65);
+    const analysis = await analyzeTranscript(transcript, model);
+    updateTaskProgress(taskId, 100);
     console.log('Аналіз завершено');
 
     // Оновлюємо статус завдання
     tasks.set(taskId, {
       status: 'completed',
+      progress: 100,
       analysis: analysis
     });
 
@@ -90,7 +107,15 @@ async function processAudioFile(taskId, filePath) {
 
   } catch (error) {
     console.error('Помилка обробки файлу:', error);
-    tasks.set(taskId, { status: 'failed', error: error.message });
+    tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
+  }
+}
+
+function updateTaskProgress(taskId, progress) {
+  const task = tasks.get(taskId);
+  if (task) {
+    task.progress = progress;
+    tasks.set(taskId, task);
   }
 }
 
@@ -117,7 +142,7 @@ async function transcribeAudio(filePath) {
   }
 }
 
-async function analyzeTranscript(transcript) {
+async function analyzeTranscript(transcript, model) {
     const prompt = `Проаналізуйте детально цей транскрипт продажного дзвінка:
 
     ${transcript}
@@ -167,7 +192,7 @@ async function analyzeTranscript(transcript) {
 
   try {
     const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4o',
+      model: model,
       messages: [
         { role: 'system', content: 'Ви - експерт з аналізу продажних дзвінків. Відповідайте українською мовою.' },
         { role: 'user', content: prompt }

@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const analyzeButton = document.getElementById('analyze-button');
     const statusDiv = document.getElementById('status');
     const resultDiv = document.getElementById('result');
+    const modelRadios = document.querySelectorAll('input[name="model"]');
     const progressBar = document.createElement('div');
     progressBar.className = 'progress-bar';
     const progressFill = document.createElement('div');
@@ -24,15 +25,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
+        formData.append('model', document.querySelector('input[name="model"]:checked').value);
 
         statusDiv.textContent = 'Завантаження файлу...';
         resultDiv.innerHTML = '';
         statusDiv.appendChild(progressBar);
-        analyzeButton.disabled = true;
-        
-        fileInput.disabled = true;
-        fileLabel.style.pointerEvents = 'none';
-        fileLabel.style.opacity = '0.5';
+        setFormDisabled(true);
 
         try {
             console.log('Відправка файлу на сервер...');
@@ -52,28 +50,26 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Помилка:', error);
             statusDiv.textContent = `Помилка: ${error.message}`;
         } finally {
-            analyzeButton.disabled = false;
-            fileInput.disabled = false;
-            fileLabel.style.pointerEvents = '';
-            fileLabel.style.opacity = '';
+            setFormDisabled(false);
             document.querySelector('.file-text').textContent = 'Додати аудіо';
             fileInput.value = '';
             statusDiv.removeChild(progressBar);
         }
     });
 
-    async function pollTaskStatus(taskId) {
-        const pollInterval = 5000; // 5 секунд
-        const maxAttempts = 60; // Максимальное количество попыток (5 минут)
-        let attempts = 0;
+    function setFormDisabled(disabled) {
+        analyzeButton.disabled = disabled;
+        fileInput.disabled = disabled;
+        fileLabel.style.pointerEvents = disabled ? 'none' : '';
+        fileLabel.style.opacity = disabled ? '0.5' : '';
+        modelRadios.forEach(radio => radio.disabled = disabled);
+    }
 
-        while (attempts < maxAttempts) {
+    async function pollTaskStatus(taskId) {
+        const pollInterval = 1000; // 1 секунда
+
+        while (true) {
             try {
-                console.log(`Перевірка статусу завдання ${taskId}...`);
-                const progress = Math.min(Math.round((attempts / maxAttempts) * 100), 99);
-                progressFill.style.width = `${progress}%`;
-                statusDiv.textContent = `Обробка файлу... ${progress}%`;
-                
                 const response = await fetch(`/api/task-status/${taskId}`);
                 if (!response.ok) {
                     throw new Error(`HTTP помилка! статус: ${response.status}`);
@@ -82,8 +78,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
                 console.log('Отримано результат:', result);
 
+                updateProgressBar(result.progress);
+
                 if (result.status === 'completed') {
-                    progressFill.style.width = '100%';
                     statusDiv.textContent = 'Аналіз завершено';
                     resultDiv.innerHTML = `
                         <h2>Результати аналізу:</h2>
@@ -95,13 +92,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 await new Promise(resolve => setTimeout(resolve, pollInterval));
-                attempts++;
             } catch (error) {
                 console.error('Помилка при перевірці статусу:', error);
                 throw error;
             }
         }
+    }
 
-        throw new Error('Перевищено час очікування результатів аналізу');
+    function updateProgressBar(progress) {
+        progressFill.style.width = `${progress}%`;
+        statusDiv.textContent = `Обробка файлу... ${progress}%`;
     }
 });
