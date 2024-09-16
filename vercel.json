@@ -12,13 +12,12 @@
     ],
     "routes": [
       {
-        "src": "/styles.css",
-        "dest": "/public/style.css"
+        "src": "/api/(.*)",
+        "dest": "server.js"
       },
       {
-        "src": "/script.js",
-        "dest": "/public/script.js"
-      },
-      { "src": "/(.*)", "dest": "/server.js" }
+        "src": "/(.*)",
+        "dest": "/public/$1"
+      }
     ]
   }

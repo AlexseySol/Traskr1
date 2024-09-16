@@ -5,22 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Аналіз аудіо дзвінків</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
     <div class="container">
         <h1>Аналіз аудіо дзвінків</h1>
         <div class="upload-area">
-            <input type="file" id="file-input" accept="audio/*" class="file-input">
+            <input type="file" id="file-input" accept="audio/*,.m4a,.mp3,.wav,.aac" class="file-input">
             <label for="file-input" class="file-label">
                 <span class="file-icon">🎵</span>
-                <span class="file-text">Виберіть аудіо файл</span>
+                <span class="file-text">Додати аудіо</span>
             </label>
         </div>
         <button id="analyze-button" disabled>Аналізувати</button>
         <div id="status"></div>
         <div id="result"></div>
     </div>
-    <script src="script.js"></script>
+    <script src="/script.js"></script>
 </body>
 </html>
