@@ -1,21 +1,17 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const fileInput = document.getElementById('audio-file');
+    const fileInput = document.getElementById('file-input');
     const analyzeButton = document.getElementById('analyze-button');
-    const loader = document.getElementById('loader');
-    const stagesDiv = document.getElementById('stages');
+    const statusDiv = document.getElementById('status');
     const resultDiv = document.getElementById('result');
 
-    loader.style.display = 'none';
-    analyzeButton.disabled = true;
-
-    fileInput.addEventListener('change', (e) => {
-        const fileName = e.target.files[0]?.name || 'Виберіть аудіо файл';
-        e.target.nextElementSibling.querySelector('span').textContent = fileName;
-        analyzeButton.disabled = !e.target.files[0];
+    fileInput.addEventListener('change', () => {
+        const fileName = fileInput.files[0]?.name || 'Виберіть аудіо файл';
+        document.querySelector('.file-text').textContent = fileName;
+        analyzeButton.disabled = !fileInput.files.length;
     });
 
     analyzeButton.addEventListener('click', async () => {
-        if (!fileInput.files[0]) {
+        if (!fileInput.files.length) {
             alert('Будь ласка, виберіть аудіо файл');
             return;
         }
@@ -23,13 +19,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
 
-        stagesDiv.innerHTML = '';
+        statusDiv.textContent = 'Завантаження файлу...';
         resultDiv.innerHTML = '';
-        loader.style.display = 'flex';
         analyzeButton.disabled = true;
 
         try {
-            updateStage('Завантаження файлу', false);
             const response = await fetch('/api/start-analysis', {
                 method: 'POST',
                 body: formData
@@ -40,16 +34,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const { taskId } = await response.json();
-            updateStage('Завантаження файлу', true);
-            updateStage('Обробка файлу', false);
-
             await pollTaskStatus(taskId);
         } catch (error) {
             console.error('Помилка:', error);
-            updateStage('Помилка обробки', false);
-            resultDiv.innerHTML = `<h2>Помилка</h2><pre>${error.message}</pre>`;
+            statusDiv.textContent = `Помилка: ${error.message}`;
         } finally {
-            loader.style.display = 'none';
             analyzeButton.disabled = false;
         }
     });
@@ -61,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         while (attempts < maxAttempts) {
             try {
+                statusDiv.textContent = 'Обробка файлу...';
                 const response = await fetch(`/api/task-status/${taskId}`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -69,9 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
 
                 if (result.status === 'completed') {
-                    updateStage('Обробка файлу', true);
-                    updateStage('Аналіз завершено', true);
-
+                    statusDiv.textContent = 'Аналіз завершено';
                     resultDiv.innerHTML = `
                         <h2>Результати аналізу:</h2>
                         <pre>${result.analysis}</pre>
@@ -90,17 +78,5 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         throw new Error('Перевищено час очікування результатів аналізу');
-    }
-
-    function updateStage(stageName, isComplete) {
-        const stageElement = document.createElement('div');
-        stageElement.classList.add('stage');
-        if (isComplete) {
-            stageElement.classList.add('complete');
-        }
-        stageElement.textContent = stageName;
-        setTimeout(() => {
-            stagesDiv.appendChild(stageElement);
-        }, stagesDiv.children.length * 100); // Задержка для каждого нового этапа
     }
 });
