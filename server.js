@@ -10,7 +10,14 @@ require('dotenv').config();
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
+
+// Устанавливаем временную директорию для загрузки файлов
+const uploadDirectory = '/tmp/uploads/';
+if (!fs.existsSync(uploadDirectory)) {
+  fs.mkdirSync(uploadDirectory);
+}
+
+const upload = multer({ dest: uploadDirectory });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
