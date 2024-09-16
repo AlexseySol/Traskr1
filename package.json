@@ -4,7 +4,8 @@
     "description": "Web app for audio analysis",
     "main": "server.js",
     "scripts": {
-        "start": "node server.js"
+        "start": "node server.js", 
+        "build": "echo 'No build step needed for server application'" 
     },
     "dependencies": {
         "@ffmpeg-installer/ffmpeg": "^1.1.0",
