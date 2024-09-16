@@ -3,24 +3,56 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
-const fs = require('fs');
+const fs = require('fs').promises;
 const FormData = require('form-data');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 require('dotenv').config();
 
+// Налаштування логування
+const winston = require('winston');
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.File({ filename: 'error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'combined.log' }),
+    new winston.transports.Console()
+  ]
+});
+
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 
+// Налаштування завантаження файлів
 const uploadDirectory = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDirectory)) {
-  fs.mkdirSync(uploadDirectory, { recursive: true });
-}
+const storage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    try {
+      await fs.mkdir(uploadDirectory, { recursive: true });
+      cb(null, uploadDirectory);
+    } catch (error) {
+      cb(error);
+    }
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
 
-const upload = multer({ dest: uploadDirectory });
+const upload = multer({ storage: storage });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+if (!OPENAI_API_KEY) {
+  logger.error('OPENAI_API_KEY is not set');
+  process.exit(1);
+}
 
 const tasks = new Map();
 
@@ -29,7 +61,7 @@ app.use(express.json());
 
 // Middleware для логування запитів
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  logger.info(`${req.method} ${req.url}`);
   next();
 });
 
@@ -37,97 +69,106 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
-app.post('/api/start-analysis', upload.single('file'), (req, res) => {
-  console.log('Received request to start analysis');
+app.post('/api/start-analysis', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
-      console.log('No file uploaded');
       return res.status(400).json({ error: 'Файл не завантажено' });
     }
 
-    console.log('File uploaded:', req.file);
     const taskId = uuidv4();
     const model = req.body.model || 'chatgpt-4o-latest';
     tasks.set(taskId, { status: 'processing', progress: 0, file: req.file, model: model });
 
-    console.log(`Task created: ${taskId}`);
     // Запускаємо обробку в окремому процесі
-    processAudioFile(taskId, req.file.path, model);
+    processAudioFile(taskId, req.file.path, model).catch(error => {
+      logger.error('Error in processAudioFile:', error);
+      tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
+    });
 
     res.json({ taskId });
   } catch (error) {
-    console.error('Error in start-analysis:', error);
+    logger.error('Error in start-analysis:', error);
     res.status(500).json({ error: 'Внутрішня помилка сервера', details: error.message });
   }
 });
 
 app.get('/api/task-status/:taskId', (req, res) => {
   const taskId = req.params.taskId;
-  console.log(`Checking status for task: ${taskId}`);
   const task = tasks.get(taskId);
 
   if (!task) {
-    console.log(`Task not found: ${taskId}`);
     return res.status(404).json({ error: 'Завдання не знайдено' });
   }
 
-  console.log(`Task status: ${JSON.stringify(task)}`);
   res.json(task);
 });
 
-function processAudioFile(taskId, filePath, model) {
-  console.log(`Processing audio file for task: ${taskId}`);
+async function processAudioFile(taskId, filePath, model) {
   const outputPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.mp3`);
 
-  ffmpeg(filePath)
-    .toFormat('mp3')
-    .on('start', (commandLine) => {
-      console.log('Spawned ffmpeg with command: ' + commandLine);
-    })
-    .on('progress', (progress) => {
-      console.log(`Processing: ${progress.percent}% done`);
-      updateTaskProgress(taskId, Math.min(progress.percent, 25));
-    })
-    .on('end', () => {
-      console.log('File has been converted successfully');
-      updateTaskProgress(taskId, 25);
-      transcribeAudio(outputPath, taskId, model);
-    })
-    .on('error', (err) => {
-      console.error('Error:', err);
-      tasks.set(taskId, { status: 'failed', progress: 100, error: err.message });
-    })
-    .save(outputPath);
+  try {
+    await convertToMp3(filePath, outputPath, taskId);
+    logger.info(`File converted to MP3 for task: ${taskId}`);
+    
+    const transcript = await transcribeAudio(outputPath, taskId);
+    logger.info(`Audio transcribed for task: ${taskId}`);
+    
+    const analysis = await analyzeTranscript(transcript, taskId, model);
+    logger.info(`Transcript analyzed for task: ${taskId}`);
+    
+    tasks.set(taskId, {
+      status: 'completed',
+      progress: 100,
+      analysis: analysis
+    });
+
+    // Видаляємо тимчасові файли
+    await fs.unlink(filePath);
+    await fs.unlink(outputPath);
+  } catch (error) {
+    logger.error(`Error processing audio file for task ${taskId}:`, error);
+    tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
+  }
 }
 
-function transcribeAudio(filePath, taskId, model) {
-  console.log(`Transcribing audio for task: ${taskId}`);
-  const formData = new FormData();
-  formData.append('file', fs.createReadStream(filePath));
-  formData.append('model', 'whisper-1');
-  formData.append('language', 'uk');
-
-  axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
-    headers: {
-      ...formData.getHeaders(),
-      'Authorization': `Bearer ${OPENAI_API_KEY}`
-    },
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity
-  })
-  .then(response => {
-    console.log('Transcription completed');
-    updateTaskProgress(taskId, 60);
-    analyzeTranscript(response.data.text, taskId, model);
-  })
-  .catch(error => {
-    console.error('Transcription error:', error);
-    tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
+function convertToMp3(input, output, taskId) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(input)
+      .toFormat('mp3')
+      .on('progress', (progress) => {
+        updateTaskProgress(taskId, Math.min(progress.percent, 25));
+      })
+      .on('end', () => resolve())
+      .on('error', (err) => reject(err))
+      .save(output);
   });
 }
 
-function analyzeTranscript(transcript, taskId, model) {
-  console.log(`Analyzing transcript for task: ${taskId}`);
+async function transcribeAudio(filePath, taskId) {
+  const formData = new FormData();
+  formData.append('file', await fs.readFile(filePath), { filename: 'audio.mp3' });
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'uk');
+
+  try {
+    const response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
+      headers: {
+        ...formData.getHeaders(),
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
+
+    updateTaskProgress(taskId, 60);
+    return response.data.text;
+  } catch (error) {
+    logger.error('Error in transcribeAudio:', error);
+    throw new Error('Помилка при транскрибації аудіо');
+  }
+}
+
+async function analyzeTranscript(transcript, taskId, model) {
   const prompt = `Проаналізуйте детально цей транскрипт продажного дзвінка:
 
   ${transcript}
@@ -175,34 +216,29 @@ function analyzeTranscript(transcript, taskId, model) {
   
   Будь ласка, надайте детальний аналіз по кожному пункту, підкріплюючи свої висновки конкретними прикладами з транскрипту.`;
 
-  axios.post('https://api.openai.com/v1/chat/completions', {
-    model: model,
-    messages: [
-      { role: 'system', content: 'Ви - експерт з аналізу продажних дзвінків. Відповідайте українською мовою.' },
-      { role: 'user', content: prompt }
-    ]
-  }, {
-    headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json'
-    }
-  })
-  .then(response => {
-    console.log('Analysis completed');
-    tasks.set(taskId, {
-      status: 'completed',
-      progress: 100,
-      analysis: response.data.choices[0].message.content
+  try {
+    const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+      model: model,
+      messages: [
+        { role: 'system', content: 'Ви - експерт з аналізу продажних дзвінків. Відповідайте українською мовою.' },
+        { role: 'user', content: prompt }
+      ]
+    }, {
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
     });
-  })
-  .catch(error => {
-    console.error('Analysis error:', error);
-    tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
-  });
+
+    updateTaskProgress(taskId, 100);
+    return response.data.choices[0].message.content;
+  } catch (error) {
+    logger.error('Error in analyzeTranscript:', error);
+    throw new Error('Помилка при аналізі транскрипту');
+  }
 }
 
 function updateTaskProgress(taskId, progress) {
-  console.log(`Updating progress for task ${taskId}: ${progress}%`);
   const task = tasks.get(taskId);
   if (task) {
     task.progress = progress;
@@ -212,13 +248,17 @@ function updateTaskProgress(taskId, progress) {
 
 // Обробник помилок
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).send('Щось пішло не так!');
+  logger.error('Unhandled error:', err);
+  res.status(500).json({
+    error: 'Внутрішня помилка сервера',
+    details: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Сервер запущено на порту ${port}`);
+  logger.info(`Сервер запущено на порту ${port}`);
 });
 
 module.exports = app;
