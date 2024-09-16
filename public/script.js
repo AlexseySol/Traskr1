@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultDiv = document.getElementById('result');
 
     fileInput.addEventListener('change', () => {
-        const fileName = fileInput.files[0]?.name || 'Виберіть аудіо файл';
+        const fileName = fileInput.files[0]?.name || 'Виберіть або запишіть аудіо';
         document.querySelector('.file-text').textContent = fileName;
         analyzeButton.disabled = !fileInput.files.length;
     });
