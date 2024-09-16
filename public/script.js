@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             updateStage('Завантаження файлу', false);
-            const response = await fetch('/start-analysis', {
+            const response = await fetch('/api/start-analysis', {
                 method: 'POST',
                 body: formData
             });
@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         while (attempts < maxAttempts) {
             try {
-                const response = await fetch(`/task-status/${taskId}`);
+                const response = await fetch(`/api/task-status/${taskId}`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -70,22 +70,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (result.status === 'completed') {
                     updateStage('Обробка файлу', true);
-                    updateStage('Аналіз голосу', true);
-                    updateStage('Аналіз змісту', true);
+                    updateStage('Аналіз завершено', true);
 
                     resultDiv.innerHTML = `
                         <h2>Результати аналізу:</h2>
-                        <h3>Аналіз голосу:</h3>
-                        <pre>${result.voiceAnalysis}</pre>
-                        <h3>Аналіз змісту:</h3>
-                        <pre>${result.contentAnalysis}</pre>
+                        <pre>${result.analysis}</pre>
                     `;
                     return;
                 } else if (result.status === 'failed') {
                     throw new Error('Помилка обробки завдання на сервері');
                 }
 
-                // Если задача всё ещё выполняется, ждем и пробуем снова
                 await new Promise(resolve => setTimeout(resolve, pollInterval));
                 attempts++;
             } catch (error) {
