@@ -2,33 +2,18 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const axios = require('axios');
 const fs = require('fs').promises;
-const FormData = require('form-data');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const axios = require('axios');
+const FormData = require('form-data');
 require('dotenv').config();
-
-// Налаштування логування
-const winston = require('winston');
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-    new winston.transports.Console()
-  ]
-});
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 
-// Налаштування завантаження файлів
+// Налаштування для завантаження файлів
 const uploadDirectory = path.join(__dirname, 'uploads');
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
@@ -50,7 +35,7 @@ const upload = multer({ storage: storage });
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 if (!OPENAI_API_KEY) {
-  logger.error('OPENAI_API_KEY is not set');
+  console.error('OPENAI_API_KEY is not set');
   process.exit(1);
 }
 
@@ -59,35 +44,39 @@ const tasks = new Map();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// Middleware для логування запитів
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`);
-  next();
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK' });
-});
-
 app.post('/api/start-analysis', upload.single('file'), async (req, res) => {
   try {
+    console.log('Received request to start analysis');
+    
     if (!req.file) {
+      console.log('No file uploaded');
       return res.status(400).json({ error: 'Файл не завантажено' });
     }
 
     const taskId = uuidv4();
     const model = req.body.model || 'chatgpt-4o-latest';
-    tasks.set(taskId, { status: 'processing', progress: 0, file: req.file, model: model });
+    
+    tasks.set(taskId, { 
+      status: 'processing', 
+      progress: 0, 
+      file: {
+        path: req.file.path,
+        originalName: req.file.originalname
+      }, 
+      model: model 
+    });
 
-    // Запускаємо обробку в окремому процесі
+    console.log(`Task created: ${taskId}`);
+    
+    res.json({ taskId });
+
     processAudioFile(taskId, req.file.path, model).catch(error => {
-      logger.error('Error in processAudioFile:', error);
+      console.error('Error in processAudioFile:', error);
       tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
     });
 
-    res.json({ taskId });
   } catch (error) {
-    logger.error('Error in start-analysis:', error);
+    console.error('Error in start-analysis:', error);
     res.status(500).json({ error: 'Внутрішня помилка сервера', details: error.message });
   }
 });
@@ -108,13 +97,13 @@ async function processAudioFile(taskId, filePath, model) {
 
   try {
     await convertToMp3(filePath, outputPath, taskId);
-    logger.info(`File converted to MP3 for task: ${taskId}`);
+    console.log(`File converted to MP3 for task: ${taskId}`);
     
     const transcript = await transcribeAudio(outputPath, taskId);
-    logger.info(`Audio transcribed for task: ${taskId}`);
+    console.log(`Audio transcribed for task: ${taskId}`);
     
     const analysis = await analyzeTranscript(transcript, taskId, model);
-    logger.info(`Transcript analyzed for task: ${taskId}`);
+    console.log(`Transcript analyzed for task: ${taskId}`);
     
     tasks.set(taskId, {
       status: 'completed',
@@ -122,11 +111,10 @@ async function processAudioFile(taskId, filePath, model) {
       analysis: analysis
     });
 
-    // Видаляємо тимчасові файли
     await fs.unlink(filePath);
     await fs.unlink(outputPath);
   } catch (error) {
-    logger.error(`Error processing audio file for task ${taskId}:`, error);
+    console.error(`Error processing audio file for task ${taskId}:`, error);
     tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
   }
 }
@@ -163,7 +151,7 @@ async function transcribeAudio(filePath, taskId) {
     updateTaskProgress(taskId, 60);
     return response.data.text;
   } catch (error) {
-    logger.error('Error in transcribeAudio:', error);
+    console.error('Error in transcribeAudio:', error);
     throw new Error('Помилка при транскрибації аудіо');
   }
 }
@@ -233,7 +221,7 @@ async function analyzeTranscript(transcript, taskId, model) {
     updateTaskProgress(taskId, 100);
     return response.data.choices[0].message.content;
   } catch (error) {
-    logger.error('Error in analyzeTranscript:', error);
+    console.error('Error in analyzeTranscript:', error);
     throw new Error('Помилка при аналізі транскрипту');
   }
 }
@@ -246,19 +234,9 @@ function updateTaskProgress(taskId, progress) {
   }
 }
 
-// Обробник помилок
-app.use((err, req, res, next) => {
-  logger.error('Unhandled error:', err);
-  res.status(500).json({
-    error: 'Внутрішня помилка сервера',
-    details: err.message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-  });
-});
-
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  logger.info(`Сервер запущено на порту ${port}`);
+  console.log(`Сервер запущено на порту ${port}`);
 });
 
 module.exports = app;
