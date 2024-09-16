@@ -99,6 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
             stageElement.classList.add('complete');
         }
         stageElement.textContent = stageName;
-        stagesDiv.appendChild(stageElement);
+        setTimeout(() => {
+            stagesDiv.appendChild(stageElement);
+        }, stagesDiv.children.length * 100); // Задержка для каждого нового этапа
     }
 });
