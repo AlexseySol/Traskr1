@@ -1,0 +1,30 @@
+# Node modules
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment Variables
+.env
+
+# MacOS Files
+.DS_Store
+
+# IDE/Editor Directories
+.vscode/
+.idea/
+
+# npm package lock file
+package-lock.json
+
+# Build outputs
+dist/
+build/
+
+# System files
+Thumbs.db
+*.swp

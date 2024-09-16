@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Аналіз аудіо розмови</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Аналіз аудіо розмови</h1>
+        </header>
+        <main>
+            <form id="upload-form" enctype="multipart/form-data">
+                <div class="file-input-wrapper">
+                    <input type="file" id="audio-file" name="file" accept="audio/*" required>
+                    <label for="audio-file">
+                        <i class="fas fa-microphone"></i>
+                        <span>Виберіть аудіо файл</span>
+                    </label>
+                </div>
+                <button type="button" id="analyze-button" disabled>
+                    <i class="fas fa-play"></i>
+                    Аналізувати
+                </button>
+            </form>
+            <div id="loader" class="hidden">
+                <div class="spinner">
+                    <div class="double-bounce1"></div>
+                    <div class="double-bounce2"></div>
+                </div>
+                <p>ІІ аналізує аудіо...</p>
+            </div>
+            <div id="stages"></div>
+            <div id="result"></div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
