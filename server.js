@@ -57,6 +57,22 @@ app.post('/analyze', upload.single('file'), async (req, res) => {
 
         console.log(`Обробка файлу: ${req.file.originalname}, розмір: ${req.file.size} байтів`);
 
+        // Отправляем предварительный ответ клиенту
+        res.json({ status: 'processing', message: 'Файл отримано та обробляється' });
+
+        // Продолжаем обработку асинхронно
+        processAudioFile(filePath, outputPath).catch(error => {
+            console.error('Помилка обробки файлу:', error);
+        });
+
+    } catch (error) {
+        console.error('Деталі помилки:', error.response ? error.response.data : error);
+        res.status(500).json({ error: 'Під час аналізу сталася помилка.', details: error.message });
+    }
+});
+
+async function processAudioFile(filePath, outputPath) {
+    try {
         // Перекодуємо аудіо в mp3
         await new Promise((resolve, reject) => {
             ffmpeg(filePath)
@@ -80,19 +96,16 @@ app.post('/analyze', upload.single('file'), async (req, res) => {
         const contentAnalysis = await analyzeContent(transcript);
         console.log('Аналіз змісту завершено');
 
+        // Здесь можно отправить результаты через вебхук или сохранить в базу данных
+
         // Видаляємо тимчасові файли
         fs.unlinkSync(filePath);
         fs.unlinkSync(outputPath);
 
-        res.json({
-            voiceAnalysis: voiceAnalysis,
-            contentAnalysis: contentAnalysis
-        });
     } catch (error) {
-        console.error('Деталі помилки:', error.response ? error.response.data : error);
-        res.status(500).json({ error: 'Під час аналізу сталася помилка.', details: error.message });
+        console.error('Помилка під час обробки файлу:', error);
     }
-});
+}
 
 async function transcribeAudio(filePath) {
     const formData = new FormData();

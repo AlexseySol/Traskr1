@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         analyzeButton.disabled = true;
 
         try {
+            updateStage('Завантаження файлу', false);
             const response = await fetch('/analyze', {
                 method: 'POST',
                 body: formData
@@ -40,11 +41,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
+            updateStage('Завантаження файлу', true);
+            updateStage('Обробка файлу', false);
+
             const result = await response.json();
 
-            updateStage('Файл оброблено', true);
-            updateStage('Аналіз голосу завершено', true);
-            updateStage('Аналіз змісту завершено', true);
+            updateStage('Обробка файлу', true);
+            updateStage('Аналіз голосу', true);
+            updateStage('Аналіз змісту', true);
 
             loader.style.display = 'none'; // Скрываем лоадер после завершения анализа
             analyzeButton.disabled = false;
@@ -60,7 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Помилка:', error);
             loader.style.display = 'none';
             analyzeButton.disabled = false;
-            resultDiv.textContent = `Помилка: ${error.message}`;
+            resultDiv.innerHTML = `<h2>Помилка</h2><pre>${error.message}</pre>`;
+            updateStage('Помилка обробки', false);
         }
     });
 
