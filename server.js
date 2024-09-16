@@ -27,67 +27,81 @@ const tasks = new Map();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
+// Middleware для логування запитів
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
 app.post('/api/start-analysis', upload.single('file'), (req, res) => {
+  console.log('Received request to start analysis');
   try {
     if (!req.file) {
+      console.log('No file uploaded');
       return res.status(400).json({ error: 'Файл не завантажено' });
     }
 
+    console.log('File uploaded:', req.file);
     const taskId = uuidv4();
     const model = req.body.model || 'chatgpt-4o-latest';
     tasks.set(taskId, { status: 'processing', progress: 0, file: req.file, model: model });
 
+    console.log(`Task created: ${taskId}`);
     // Запускаємо обробку в окремому процесі
     processAudioFile(taskId, req.file.path, model);
 
     res.json({ taskId });
   } catch (error) {
-    console.error('Помилка при створенні завдання:', error);
-    res.status(500).json({ error: 'Внутрішня помилка сервера' });
+    console.error('Error in start-analysis:', error);
+    res.status(500).json({ error: 'Внутрішня помилка сервера', details: error.message });
   }
 });
 
 app.get('/api/task-status/:taskId', (req, res) => {
-  try {
-    const taskId = req.params.taskId;
-    const task = tasks.get(taskId);
+  const taskId = req.params.taskId;
+  console.log(`Checking status for task: ${taskId}`);
+  const task = tasks.get(taskId);
 
-    if (!task) {
-      return res.status(404).json({ error: 'Завдання не знайдено' });
-    }
-
-    res.json(task);
-  } catch (error) {
-    console.error('Помилка при отриманні статусу завдання:', error);
-    res.status(500).json({ error: 'Внутрішня помилка сервера' });
+  if (!task) {
+    console.log(`Task not found: ${taskId}`);
+    return res.status(404).json({ error: 'Завдання не знайдено' });
   }
+
+  console.log(`Task status: ${JSON.stringify(task)}`);
+  res.json(task);
 });
 
 function processAudioFile(taskId, filePath, model) {
+  console.log(`Processing audio file for task: ${taskId}`);
   const outputPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.mp3`);
 
   ffmpeg(filePath)
     .toFormat('mp3')
+    .on('start', (commandLine) => {
+      console.log('Spawned ffmpeg with command: ' + commandLine);
+    })
     .on('progress', (progress) => {
+      console.log(`Processing: ${progress.percent}% done`);
       updateTaskProgress(taskId, Math.min(progress.percent, 25));
     })
     .on('end', () => {
-      console.log('Файл конвертовано в mp3');
+      console.log('File has been converted successfully');
       updateTaskProgress(taskId, 25);
       transcribeAudio(outputPath, taskId, model);
     })
     .on('error', (err) => {
-      console.error('Помилка конвертації:', err);
+      console.error('Error:', err);
       tasks.set(taskId, { status: 'failed', progress: 100, error: err.message });
     })
     .save(outputPath);
 }
 
 function transcribeAudio(filePath, taskId, model) {
+  console.log(`Transcribing audio for task: ${taskId}`);
   const formData = new FormData();
   formData.append('file', fs.createReadStream(filePath));
   formData.append('model', 'whisper-1');
@@ -102,17 +116,18 @@ function transcribeAudio(filePath, taskId, model) {
     maxBodyLength: Infinity
   })
   .then(response => {
-    console.log('Транскрибацію завершено');
+    console.log('Transcription completed');
     updateTaskProgress(taskId, 60);
     analyzeTranscript(response.data.text, taskId, model);
   })
   .catch(error => {
-    console.error('Помилка транскрибації:', error);
+    console.error('Transcription error:', error);
     tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
   });
 }
 
 function analyzeTranscript(transcript, taskId, model) {
+  console.log(`Analyzing transcript for task: ${taskId}`);
   const prompt = `Проаналізуйте детально цей транскрипт продажного дзвінка:
 
   ${transcript}
@@ -173,7 +188,7 @@ function analyzeTranscript(transcript, taskId, model) {
     }
   })
   .then(response => {
-    console.log('Аналіз завершено');
+    console.log('Analysis completed');
     tasks.set(taskId, {
       status: 'completed',
       progress: 100,
@@ -181,12 +196,13 @@ function analyzeTranscript(transcript, taskId, model) {
     });
   })
   .catch(error => {
-    console.error('Помилка аналізу:', error);
+    console.error('Analysis error:', error);
     tasks.set(taskId, { status: 'failed', progress: 100, error: error.message });
   });
 }
 
 function updateTaskProgress(taskId, progress) {
+  console.log(`Updating progress for task ${taskId}: ${progress}%`);
   const task = tasks.get(taskId);
   if (task) {
     task.progress = progress;
@@ -194,8 +210,9 @@ function updateTaskProgress(taskId, progress) {
   }
 }
 
+// Обробник помилок
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Unhandled error:', err);
   res.status(500).send('Щось пішло не так!');
 });
 
