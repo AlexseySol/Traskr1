@@ -14,14 +14,20 @@ const app = express();
 // Устанавливаем временную директорию для загрузки файлов
 const uploadDirectory = '/tmp/uploads/';
 if (!fs.existsSync(uploadDirectory)) {
-  fs.mkdirSync(uploadDirectory);
+  fs.mkdirSync(uploadDirectory, { recursive: true });
 }
 
 const upload = multer({ dest: uploadDirectory });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-app.use(express.static('public'));
+// Добавляем обработку статических файлов
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Добавляем обработку корневого маршрута
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 async function checkApiKey() {
     try {
@@ -118,7 +124,7 @@ async function analyzeContent(text) {
 
 async function analyzeText(prompt) {
     const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: 'chatgpt-4o-latest',
+        model: 'gpt-4',
         messages: [
             { role: 'system', content: 'Ви - експерт з аналізу продажних дзвінків. Відповідайте українською мовою.' },
             { role: 'user', content: prompt }
@@ -133,6 +139,10 @@ async function analyzeText(prompt) {
     return response.data.choices[0].message.content;
 }
 
-app.listen(3000, () => {
-    console.log('Сервер запущено на http://localhost:3000');
+// Изменяем настройку порта для совместимости с Vercel
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+    console.log(`Сервер запущено на порту ${port}`);
 });
+
+module.exports = app; // Экспортируем app для использования с Vercel
