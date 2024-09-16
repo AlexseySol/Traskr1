@@ -7,6 +7,9 @@ const fs = require('fs');
 const FormData = require('form-data');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const { promisify } = require('util');
+const writeFile = promisify(fs.writeFile);
+const readFile = promisify(fs.readFile);
 require('dotenv').config();
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -14,9 +17,12 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 const app = express();
 
 const uploadDirectory = path.join('/tmp', 'uploads');
-if (!fs.existsSync(uploadDirectory)) {
-  fs.mkdirSync(uploadDirectory, { recursive: true });
-}
+const cacheDirectory = path.join('/tmp', 'cache');
+[uploadDirectory, cacheDirectory].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
 
 const upload = multer({ dest: uploadDirectory });
 
@@ -59,32 +65,25 @@ app.get('/api/task-status/:taskId', (req, res) => {
 async function processAudioFile(taskId, filePath, model) {
   try {
     const outputPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.mp3`);
+    const cacheKey = await getFileHash(filePath);
+    const cachedResult = await getCachedResult(cacheKey);
 
-    // Перекодуємо аудіо в mp3
-    await new Promise((resolve, reject) => {
-      let duration = 0;
-      let progress = 0;
-      ffmpeg(filePath)
-        .toFormat('mp3')
-        .on('codecData', data => {
-          duration = parseInt(data.duration.replace(/:/g, ''));
-        })
-        .on('progress', info => {
-          const time = parseInt(info.timemark.replace(/:/g, ''));
-          progress = Math.min(Math.round((time / duration) * 25), 25);
-          updateTaskProgress(taskId, progress);
-        })
-        .on('error', (err) => reject(err))
-        .on('end', () => resolve())
-        .save(outputPath);
-    });
+    if (cachedResult) {
+      updateTaskProgress(taskId, 100);
+      tasks.set(taskId, {
+        status: 'completed',
+        progress: 100,
+        analysis: cachedResult
+      });
+      return;
+    }
 
-    updateTaskProgress(taskId, 25);
-    console.log('Файл конвертовано в mp3');
+    // Начинаем конвертацию и транскрибацию параллельно
+    const [, transcript] = await Promise.all([
+      convertToMp3(filePath, outputPath, taskId),
+      transcribeAudio(filePath, taskId)
+    ]);
 
-    // Транскрибація
-    updateTaskProgress(taskId, 30);
-    const transcript = await transcribeAudio(outputPath);
     updateTaskProgress(taskId, 60);
     console.log('Транскрибацію завершено');
 
@@ -93,6 +92,9 @@ async function processAudioFile(taskId, filePath, model) {
     const analysis = await analyzeTranscript(transcript, model);
     updateTaskProgress(taskId, 100);
     console.log('Аналіз завершено');
+
+    // Кэшируем результат
+    await cacheResult(cacheKey, analysis);
 
     // Оновлюємо статус завдання
     tasks.set(taskId, {
@@ -111,21 +113,29 @@ async function processAudioFile(taskId, filePath, model) {
   }
 }
 
-function updateTaskProgress(taskId, progress) {
-  const task = tasks.get(taskId);
-  if (task) {
-    task.progress = progress;
-    tasks.set(taskId, task);
-  }
+async function convertToMp3(inputPath, outputPath, taskId) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .outputOptions('-acodec libmp3lame')
+      .outputOptions('-b:a 96k')  // Уменьшаем битрейт для ускорения
+      .on('progress', (progress) => {
+        const percent = Math.min(Math.round(progress.percent), 25);
+        updateTaskProgress(taskId, percent);
+      })
+      .on('error', reject)
+      .on('end', resolve)
+      .save(outputPath);
+  });
 }
 
-async function transcribeAudio(filePath) {
+async function transcribeAudio(filePath, taskId) {
   const formData = new FormData();
   formData.append('file', fs.createReadStream(filePath));
   formData.append('model', 'whisper-1');
   formData.append('language', 'uk');
 
   try {
+    updateTaskProgress(taskId, 30);
     const response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
       headers: {
         ...formData.getHeaders(),
@@ -135,6 +145,7 @@ async function transcribeAudio(filePath) {
       maxBodyLength: Infinity
     });
 
+    updateTaskProgress(taskId, 55);
     return response.data.text;
   } catch (error) {
     console.error('Помилка транскрибації:', error);
@@ -209,6 +220,35 @@ async function analyzeTranscript(transcript, model) {
     console.error('Помилка аналізу:', error);
     throw error;
   }
+}
+
+function updateTaskProgress(taskId, progress) {
+  const task = tasks.get(taskId);
+  if (task) {
+    task.progress = progress;
+    tasks.set(taskId, task);
+  }
+}
+
+async function getFileHash(filePath) {
+  const crypto = require('crypto');
+  const fileBuffer = await readFile(filePath);
+  return crypto.createHash('md5').update(fileBuffer).digest('hex');
+}
+
+async function getCachedResult(cacheKey) {
+  const cacheFile = path.join(cacheDirectory, `${cacheKey}.json`);
+  try {
+    const data = await readFile(cacheFile, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return null;
+  }
+}
+
+async function cacheResult(cacheKey, result) {
+  const cacheFile = path.join(cacheDirectory, `${cacheKey}.json`);
+  await writeFile(cacheFile, JSON.stringify(result));
 }
 
 app.get('*', (req, res) => {
