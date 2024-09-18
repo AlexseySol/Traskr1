@@ -83,10 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (result.status === 'completed') {
                     statusDiv.textContent = 'Аналіз завершено';
-                    resultDiv.innerHTML = `
-                        <h2>Результати аналізу:</h2>
-                        <pre>${result.analysis}</pre>
-                    `;
+                    displayFormattedResults(result.analysis);
                     return;
                 } else if (result.status === 'failed') {
                     throw new Error('Помилка обробки завдання на сервері');
@@ -99,6 +96,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
         }
+    }
+
+    function displayFormattedResults(analysis) {
+        const sections = analysis.split(/(?=###)/);
+        let formattedHtml = '<div class="analysis-results">';
+
+        sections.forEach(section => {
+            const lines = section.trim().split('\n');
+            const title = lines[0].replace(/^###\s*/, '').trim();
+            const content = lines.slice(1).join('\n').trim();
+
+            formattedHtml += `
+                <div class="analysis-section">
+                    <h2>${title}</h2>
+                    <div class="section-content">
+                        ${formatContent(content)}
+                    </div>
+                </div>
+            `;
+        });
+
+        formattedHtml += '</div>';
+        resultDiv.innerHTML = formattedHtml;
+    }
+
+    function formatContent(content) {
+        // Форматування підзаголовків
+        content = content.replace(/####\s*(.*)/g, '<h3>$1</h3>');
+
+        // Форматування жирного тексту
+        content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+        // Форматування списків
+        content = content.replace(/^-\s*(.*)/gm, '<li>$1</li>');
+        content = content.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+        // Форматування абзаців
+        content = content.split('\n\n').map(p => `<p>${p}</p>`).join('');
+
+        return content;
     }
 
     function updateProgressBar(progress) {
